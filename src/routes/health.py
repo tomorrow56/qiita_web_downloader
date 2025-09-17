@@ -9,7 +9,7 @@ def health_check():
     """ヘルスチェック用エンドポイント"""
     try:
         import requests
-        import beautifulsoup4
+        import bs4
         import markdownify
         import tempfile
         import zipfile
@@ -19,7 +19,7 @@ def health_check():
             'message': 'All dependencies are available',
             'dependencies': {
                 'requests': 'ok',
-                'beautifulsoup4': 'ok', 
+                'bs4': 'ok', 
                 'markdownify': 'ok',
                 'tempfile': 'ok',
                 'zipfile': 'ok'
