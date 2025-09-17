@@ -18,11 +18,16 @@ def sanitize_filename(title):
 
 def download_qiita_article(url, output_dir="."):
     """Download a Qiita article as Markdown."""
-    print(f"Fetching article from: {url}")
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Fetching article from: {url}")
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
+        logger.info(f"Successfully fetched article, status: {response.status_code}")
     except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch article: {e}")
         raise Exception(f"Error fetching article: {e}")
 
     soup = BeautifulSoup(response.content, 'html.parser')
@@ -34,16 +39,18 @@ def download_qiita_article(url, output_dir="."):
         title_tag = soup.find('h1')
 
     if not title_tag:
-        print("Could not find article title. Using a default name.")
+        logger.warning("Could not find article title. Using a default name.")
         title = "qiita_article"
     else:
         title = title_tag.get_text().strip()
+        logger.info(f"Found article title: {title}")
 
     sanitized_title = sanitize_filename(title)
     
     # --- Create output directory for the article ---
     article_output_dir = os.path.join(output_dir, sanitized_title)
     os.makedirs(article_output_dir, exist_ok=True)
+    logger.info(f"Created article directory: {article_output_dir}")
     
     md_filename = os.path.join(article_output_dir, "article.md")
     images_dir = os.path.join(article_output_dir, "images")
@@ -52,10 +59,12 @@ def download_qiita_article(url, output_dir="."):
     # --- Find article content ---
     content_div = soup.find('section', class_='it-MdContent')
     if not content_div:
+        logger.error("Could not find article content.")
         raise Exception("Could not find article content.")
 
     # --- Download images and update paths ---
-    print("Downloading images...")
+    logger.info("Downloading images...")
+    image_count = 0
     for img_tag in content_div.find_all('img'):
         img_url = img_tag.get('src')
         if not img_url:
@@ -64,7 +73,7 @@ def download_qiita_article(url, output_dir="."):
         img_url = urljoin(url, img_url)
         
         try:
-            img_response = requests.get(img_url, stream=True)
+            img_response = requests.get(img_url, stream=True, timeout=30)
             img_response.raise_for_status()
 
             img_name = os.path.basename(urlparse(img_url).path)
@@ -80,17 +89,20 @@ def download_qiita_article(url, output_dir="."):
             # Update the src to be a relative path for portability
             img_local_relative_path = os.path.join("images", img_name)
             img_tag['src'] = img_local_relative_path
-            print(f"  - Downloaded {img_name}")
+            logger.debug(f"Downloaded image: {img_name}")
+            image_count += 1
 
             # If the image is wrapped in a link, unwrap it to prevent linked markdown image
             if img_tag.parent.name == 'a':
                 img_tag.parent.unwrap()
 
         except requests.exceptions.RequestException as e:
-            print(f"  - Failed to download {img_url}: {e}")
+            logger.warning(f"Failed to download {img_url}: {e}")
+
+    logger.info(f"Downloaded {image_count} images")
 
     # --- Convert HTML to Markdown ---
-    print("Converting to Markdown...")
+    logger.info("Converting to Markdown...")
     # Use the modified HTML string for conversion
     markdown_content = md(str(content_div), heading_style="ATX")
 
@@ -98,35 +110,54 @@ def download_qiita_article(url, output_dir="."):
     with open(md_filename, 'w', encoding='utf-8') as f:
         f.write(markdown_content)
 
-    print(f"Successfully downloaded article to '{article_output_dir}'")
+    logger.info(f"Successfully downloaded article to '{article_output_dir}'")
     return article_output_dir, sanitized_title
 
 @download_bp.route('/download', methods=['POST'])
 @cross_origin()
 def download_article():
+    import traceback
+    import logging
+    
+    # ログ設定
+    logging.basicConfig(level=logging.DEBUG)
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info("Download request received")
+        
         data = request.get_json()
         if not data or 'url' not in data:
+            logger.error("No URL provided in request")
             return jsonify({'error': 'URLが指定されていません'}), 400
         
         url = data['url']
+        logger.info(f"Processing URL: {url}")
         
         # URLの簡単な検証
         if not url or not isinstance(url, str):
+            logger.error("Invalid URL format")
             return jsonify({'error': '有効なURLを入力してください'}), 400
         
         if 'qiita.com' not in url:
+            logger.error("Not a Qiita URL")
             return jsonify({'error': 'QiitaのURLを入力してください'}), 400
         
         # 一時ディレクトリを作成
-        with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            temp_dir = tempfile.mkdtemp()
+            logger.info(f"Created temp directory: {temp_dir}")
+            
             try:
                 # 記事をダウンロード
+                logger.info("Starting article download")
                 article_dir, article_title = download_qiita_article(url, temp_dir)
+                logger.info(f"Article downloaded to: {article_dir}")
                 
                 # ZIPファイルを作成
                 zip_filename = f"{article_title}.zip"
                 zip_path = os.path.join(temp_dir, zip_filename)
+                logger.info(f"Creating ZIP file: {zip_path}")
                 
                 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for root, dirs, files in os.walk(article_dir):
@@ -135,6 +166,9 @@ def download_article():
                             # ZIP内でのパスを相対パスにする
                             arcname = os.path.relpath(file_path, temp_dir)
                             zipf.write(file_path, arcname)
+                            logger.debug(f"Added to ZIP: {arcname}")
+                
+                logger.info("ZIP file created successfully")
                 
                 # ZIPファイルを送信
                 return send_file(
@@ -145,10 +179,23 @@ def download_article():
                 )
                 
             except Exception as e:
-                print(f"Download error: {e}")
+                logger.error(f"Download error: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 return jsonify({'error': f'ダウンロードに失敗しました: {str(e)}'}), 500
+            finally:
+                # 一時ディレクトリをクリーンアップ
+                try:
+                    shutil.rmtree(temp_dir)
+                    logger.info("Temp directory cleaned up")
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
+                    
+        except Exception as temp_error:
+            logger.error(f"Failed to create temp directory: {temp_error}")
+            return jsonify({'error': '一時ディレクトリの作成に失敗しました'}), 500
                 
     except Exception as e:
-        print(f"Request error: {e}")
+        logger.error(f"Request error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'リクエストの処理に失敗しました'}), 500
 
