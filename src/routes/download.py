@@ -150,6 +150,7 @@ def download_article():
             
             try:
                 # 記事をダウンロード
+                logger.info("Entering download_article function")
                 logger.info("Starting article download")
                 article_dir, article_title = download_qiita_article(url, temp_dir)
                 logger.info(f"Article downloaded to: {article_dir}")
