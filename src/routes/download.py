@@ -124,9 +124,17 @@ def download_article():
     logger = logging.getLogger(__name__)
     
     try:
+        logger.info("=== DOWNLOAD REQUEST START ===")
         logger.info("Download request received")
         
-        data = request.get_json()
+        # リクエストデータの取得
+        try:
+            data = request.get_json()
+            logger.info(f"Request data received: {data}")
+        except Exception as json_error:
+            logger.error(f"Failed to parse JSON: {json_error}")
+            return jsonify({'error': 'JSONの解析に失敗しました'}), 400
+        
         if not data or 'url' not in data:
             logger.error("No URL provided in request")
             return jsonify({'error': 'URLが指定されていません'}), 400
@@ -145,39 +153,67 @@ def download_article():
         
         # 一時ディレクトリを作成
         try:
+            logger.info("Creating temporary directory...")
             temp_dir = tempfile.mkdtemp()
             logger.info(f"Created temp directory: {temp_dir}")
             
             try:
                 # 記事をダウンロード
+                logger.info("=== STARTING ARTICLE DOWNLOAD ===")
                 logger.info("Entering download_article function")
                 logger.info("Starting article download")
-                article_dir, article_title = download_qiita_article(url, temp_dir)
-                logger.info(f"Article downloaded to: {article_dir}")
+                
+                try:
+                    article_dir, article_title = download_qiita_article(url, temp_dir)
+                    logger.info(f"Article downloaded successfully to: {article_dir}")
+                    logger.info(f"Article title: {article_title}")
+                except Exception as download_error:
+                    logger.error(f"Article download failed: {str(download_error)}")
+                    logger.error(f"Download traceback: {traceback.format_exc()}")
+                    return jsonify({'error': f'記事のダウンロードに失敗しました: {str(download_error)}'}), 500
                 
                 # ZIPファイルを作成
+                logger.info("=== STARTING ZIP CREATION ===")
                 zip_filename = f"{article_title}.zip"
                 zip_path = os.path.join(temp_dir, zip_filename)
                 logger.info(f"Creating ZIP file: {zip_path}")
                 
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for root, dirs, files in os.walk(article_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            # ZIP内でのパスを相対パスにする
-                            arcname = os.path.relpath(file_path, temp_dir)
-                            zipf.write(file_path, arcname)
-                            logger.debug(f"Added to ZIP: {arcname}")
-                
-                logger.info("ZIP file created successfully")
+                try:
+                    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        for root, dirs, files in os.walk(article_dir):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                # ZIP内でのパスを相対パスにする
+                                arcname = os.path.relpath(file_path, temp_dir)
+                                zipf.write(file_path, arcname)
+                                logger.debug(f"Added to ZIP: {arcname}")
+                    
+                    logger.info("ZIP file created successfully")
+                    
+                    # ファイルサイズを確認
+                    zip_size = os.path.getsize(zip_path)
+                    logger.info(f"ZIP file size: {zip_size} bytes")
+                    
+                except Exception as zip_error:
+                    logger.error(f"ZIP creation failed: {str(zip_error)}")
+                    logger.error(f"ZIP traceback: {traceback.format_exc()}")
+                    return jsonify({'error': f'ZIPファイルの作成に失敗しました: {str(zip_error)}'}), 500
                 
                 # ZIPファイルを送信
-                return send_file(
-                    zip_path,
-                    as_attachment=True,
-                    download_name=zip_filename,
-                    mimetype='application/zip'
-                )
+                logger.info("=== STARTING FILE SEND ===")
+                logger.info(f"Sending file: {zip_path}")
+                
+                try:
+                    return send_file(
+                        zip_path,
+                        as_attachment=True,
+                        download_name=zip_filename,
+                        mimetype='application/zip'
+                    )
+                except Exception as send_error:
+                    logger.error(f"File send failed: {str(send_error)}")
+                    logger.error(f"Send traceback: {traceback.format_exc()}")
+                    return jsonify({'error': f'ファイルの送信に失敗しました: {str(send_error)}'}), 500
                 
             except Exception as e:
                 logger.error(f"Download error: {str(e)}")
@@ -186,6 +222,7 @@ def download_article():
             finally:
                 # 一時ディレクトリをクリーンアップ
                 try:
+                    logger.info("Cleaning up temporary directory...")
                     shutil.rmtree(temp_dir)
                     logger.info("Temp directory cleaned up")
                 except Exception as cleanup_error:
