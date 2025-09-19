@@ -30,7 +30,7 @@ def debug_info():
             'modules': {
                 'requests': requests.__version__,
                 'bs4': bs4.__version__,
-                'markdownify': markdownify.__version__,
+                'markdownify': getattr(markdownify, '__version__', 'version not available'),
             }
         }), 200
     except Exception as e:
