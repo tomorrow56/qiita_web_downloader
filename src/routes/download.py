@@ -16,6 +16,44 @@ def sanitize_filename(title):
     """Remove characters that cannot be used in filenames."""
     return re.sub(r'[\\/*?:">>"<>|]', "", title)
 
+def get_image_extension(url, content_type=None):
+    """Get image file extension from URL or content type."""
+    # Try to get extension from URL first
+    parsed_url = urlparse(url)
+    path = parsed_url.path.lower()
+    
+    # Common image extensions
+    if path.endswith(('.jpg', '.jpeg')):
+        return '.jpg'
+    elif path.endswith('.png'):
+        return '.png'
+    elif path.endswith('.gif'):
+        return '.gif'
+    elif path.endswith('.webp'):
+        return '.webp'
+    elif path.endswith('.svg'):
+        return '.svg'
+    elif path.endswith('.bmp'):
+        return '.bmp'
+    
+    # Try to get from content type if available
+    if content_type:
+        if 'jpeg' in content_type or 'jpg' in content_type:
+            return '.jpg'
+        elif 'png' in content_type:
+            return '.png'
+        elif 'gif' in content_type:
+            return '.gif'
+        elif 'webp' in content_type:
+            return '.webp'
+        elif 'svg' in content_type:
+            return '.svg'
+        elif 'bmp' in content_type:
+            return '.bmp'
+    
+    # Default to .jpg if cannot determine
+    return '.jpg'
+
 def download_qiita_article(url, output_dir="."):
     """Download a Qiita article as Markdown."""
     import logging
@@ -76,10 +114,11 @@ def download_qiita_article(url, output_dir="."):
             img_response = requests.get(img_url, stream=True, timeout=30)
             img_response.raise_for_status()
 
-            img_name = os.path.basename(urlparse(img_url).path)
-            if not img_name:
-                img_name = f"image_{hash(img_url)}.jpg" # Assign a name if URL path ends in /
-
+            # Generate short filename with counter
+            image_count += 1
+            img_extension = get_image_extension(img_url, img_response.headers.get('Content-Type'))
+            img_name = f"image_{image_count:03d}{img_extension}"
+            
             img_local_path = os.path.join(images_dir, img_name)
             
             with open(img_local_path, 'wb') as f:
@@ -90,7 +129,6 @@ def download_qiita_article(url, output_dir="."):
             img_local_relative_path = os.path.join("images", img_name)
             img_tag['src'] = img_local_relative_path
             logger.debug(f"Downloaded image: {img_name}")
-            image_count += 1
 
             # If the image is wrapped in a link, unwrap it to prevent linked markdown image
             if img_tag.parent.name == 'a':
@@ -105,7 +143,27 @@ def download_qiita_article(url, output_dir="."):
     logger.info("Converting to Markdown...")
     # Use the modified HTML string for conversion
     markdown_content = md(str(content_div), heading_style="ATX")
-
+    
+    # Fix heading spacing: ensure there's a space after # symbols
+    markdown_content = re.sub(r'^(#{1,6})([^\s#])', r'\1 \2', markdown_content, flags=re.MULTILINE)
+    
+    # Also fix cases where there might be multiple spaces or tabs
+    markdown_content = re.sub(r'^(#{1,6})\s+', r'\1 ', markdown_content, flags=re.MULTILINE)
+    
+    # Fix escaped asterisks in bold/italic formatting
+    # Convert \*\* back to ** for bold text
+    markdown_content = re.sub(r'\\(\*\*)', r'\1', markdown_content)
+    # Convert \* back to * for italic text (but not if it's part of **)
+    markdown_content = re.sub(r'(?<!\\)\\(\*)(?!\*)', r'\1', markdown_content)
+    # Handle cases where single asterisks are escaped
+    markdown_content = re.sub(r'\\(\*)', r'\1', markdown_content)
+    
+    # Fix emphasis markers followed by punctuation (e.g., "**text(内容)**" -> "**text(内容)** ")
+    # Add space after ** when it's followed by text or at end of emphasis
+    markdown_content = re.sub(r'(\*\*[^*]+\*\*)([^\s])', r'\1 \2', markdown_content)
+    # Add space after * when it's followed by text (but not if it's part of **)
+    markdown_content = re.sub(r'(?<!\*)(\*[^*]+\*)(?!\*)([^\s])', r'\1 \2', markdown_content)
+    
     # --- Save Markdown file ---
     with open(md_filename, 'w', encoding='utf-8') as f:
         f.write(markdown_content)
@@ -236,4 +294,3 @@ def download_article():
         logger.error(f"Request error: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'リクエストの処理に失敗しました'}), 500
-
