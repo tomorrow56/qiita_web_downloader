@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+
+# macOS
+.DS_Store
+._*
+
+# SQLite
+*.sqlite3
+*.db
+
+# Vercel local
+.vercel/
+
+# Logs
+*.log
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Cache
+.cache/
