@@ -23,7 +23,15 @@ app.register_blueprint(health_bp, url_prefix='/api')
 app.register_blueprint(debug_bp, url_prefix='/api')
 
 # uncomment if you need to use database
-app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
+# Select DB location depending on environment (Vercel is read-only except /tmp)
+app_db_base = os.environ.get('DB_DIR')
+if not app_db_base:
+    if os.environ.get('VERCEL') == '1':
+        app_db_base = '/tmp'
+    else:
+        app_db_base = os.path.join(os.path.dirname(__file__), 'database')
+os.makedirs(app_db_base, exist_ok=True)
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(app_db_base, 'app.db')}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 with app.app_context():
